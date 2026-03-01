@@ -1,189 +1,145 @@
-/* public/js/app.js */
+// app.js FINAL CORRIGIDO
+(function () {
 
-/**
- * Base da API:
- * - Se o frontend e backend estão no mesmo serviço Railway: deixe vazio ("")
- * - Se estiver em outro domínio: coloque a URL (ex: "https://seu-backend.up.railway.app")
- */
-const API = ""; // mesmo domínio
+  const API = ""; // Railway usa mesma origem
 
-// ===== Helpers de UI =====
-function $(id) {
-  return document.getElementById(id);
-}
-
-function setMsg(text, type = "erro") {
-  const el = $("msg");
-  if (!el) return;
-
-  el.textContent = text || "";
-  el.style.display = text ? "block" : "none";
-
-  // classes opcionais (se você tiver CSS)
-  el.classList.remove("ok", "erro", "warn");
-  el.classList.add(type);
-}
-
-function getValue(id) {
-  const el = $(id);
-  return el ? (el.value || "").trim() : "";
-}
-
-// ===== Auth storage =====
-function setToken(token) {
-  if (!token) return;
-  localStorage.setItem("token", token);
-}
-
-function getToken() {
-  return localStorage.getItem("token");
-}
-
-function clearToken() {
-  localStorage.removeItem("token");
-}
-
-// ===== Fetch wrapper =====
-async function apiFetch(path, options = {}) {
-  const url = `${API}${path}`;
-
-  const headers = Object.assign(
-    { "Content-Type": "application/json" },
-    options.headers || {}
-  );
-
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const config = Object.assign({}, options, { headers });
-
-  let res;
-  try {
-    res = await fetch(url, config);
-  } catch (err) {
-    // Erro de rede/CORS/domínio errado
-    throw new Error("Falha de conexão com o servidor (Failed to fetch).");
+  function getEl(id) {
+    return document.getElementById(id);
   }
 
-  // tenta ler JSON, se não der lê texto
-  const contentType = res.headers.get("content-type") || "";
-  let data = null;
+  function setMsg(texto = "", tipo = "") {
+    const el = getEl("msg");
+    if (!el) return;
 
-  if (contentType.includes("application/json")) {
-    data = await res.json().catch(() => null);
-  } else {
-    const t = await res.text().catch(() => "");
-    data = t ? { message: t } : null;
+    el.className = "msg";
+
+    const t = String(texto ?? "").trim();
+    el.textContent = t;
+
+    if (!t) {
+      el.style.display = "none";
+      return;
+    }
+
+    el.style.display = "block";
+
+    if (tipo && String(tipo).trim() !== "") {
+      el.classList.add(String(tipo).trim());
+    }
   }
 
-  if (!res.ok) {
-    const msg =
-      (data && (data.message || data.error)) ||
-      `Erro HTTP ${res.status} (${res.statusText})`;
-    throw new Error(msg);
-  }
-
-  return data;
-}
-
-// ===== LOGIN =====
-async function entrar() {
-  setMsg("");
-
-  const email = getValue("email");
-  const senha = getValue("senha");
-
-  if (!email || !senha) {
-    setMsg("Preencha email e senha.", "warn");
-    return;
-  }
-
-  try {
-    const data = await apiFetch("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, senha })
+  async function apiFetch(path, options = {}) {
+    const res = await fetch(API + path, {
+      method: options.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      body: options.body
     });
 
-    // aceita vários formatos:
-    // { token: "..." } OU { accessToken: "..." } OU { user:..., token:... }
-    const token = (data && (data.token || data.accessToken)) || null;
-    if (token) setToken(token);
+    const raw = await res.text();
+    let data = {};
 
-    setMsg("Login realizado com sucesso!", "ok");
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { message: raw };
+    }
 
-    // Redireciona (ajuste se seu fluxo for outro)
-    // - Se existir portal.html, manda pra ele
-    // - Se não, tenta index.html
-    setTimeout(() => {
-      const isInPublicFolder = location.pathname.includes("/public/");
-      // normalmente no Railway vai ser /login.html, então:
-      window.location.href = "/portal.html";
-    }, 300);
-  } catch (err) {
-    setMsg(err.message || "Erro ao fazer login.", "erro");
-  }
-}
+    if (!res.ok) {
+      throw new Error(
+        data?.erro ||
+        data?.error ||
+        data?.message ||
+        `Erro HTTP ${res.status}`
+      );
+    }
 
-// ===== REGISTER =====
-async function registrar() {
-  setMsg("");
-
-  // Campos comuns: nome/email/senha (ajuste conforme seu HTML)
-  const nome = getValue("nome");
-  const email = getValue("email");
-  const senha = getValue("senha");
-
-  if (!email || !senha) {
-    setMsg("Preencha pelo menos email e senha.", "warn");
-    return;
+    return data;
   }
 
-  try {
-    const payload = { email, senha };
-    if (nome) payload.nome = nome;
+  // =========================
+  // LOGIN
+  // =========================
+  async function entrar() {
+    setMsg("");
 
-    const data = await apiFetch("/api/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    const email = getEl("email")?.value?.trim();
+    const senha = getEl("senha")?.value?.trim();
 
-    setMsg("Conta criada! Agora faça login.", "ok");
+    if (!email || !senha) {
+      setMsg("Informe email e senha", "erro");
+      return;
+    }
 
-    setTimeout(() => {
-      window.location.href = "/login.html";
-    }, 500);
-  } catch (err) {
-    setMsg(err.message || "Erro ao criar conta.", "erro");
+    try {
+      const data = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, senha })
+      });
+
+      if (data?.token) {
+        localStorage.setItem("token", data.token);
+      }
+
+      setMsg("Login realizado ✅", "ok");
+
+      setTimeout(() => {
+        if (data?.usuario?.tipo === "admin") {
+          window.location.href = "/admin.html";
+        } else {
+          window.location.href = "/portal.html";
+        }
+      }, 400);
+
+    } catch (e) {
+      setMsg(e.message, "erro");
+    }
   }
-}
 
-// ===== LOGOUT =====
-function sair() {
-  clearToken();
-  setMsg("Sessão encerrada.", "ok");
-  setTimeout(() => {
-    window.location.href = "/login.html";
-  }, 250);
-}
+  // =========================
+  // CADASTRO
+  // =========================
+  async function cadastrar() {
+    setMsg("");
 
-// ===== Opcional: proteger páginas =====
-function exigirLogin() {
-  const token = getToken();
-  if (!token) {
-    // se estiver tentando acessar portal/admin sem logar
-    window.location.href = "/login.html";
+    const nome = getEl("nome")?.value?.trim();
+    const email = getEl("email")?.value?.trim();
+    const cpf = getEl("cpf")?.value?.trim();
+    const senha = getEl("senha")?.value?.trim();
+
+    if (!nome || !email || !cpf || !senha) {
+      setMsg("Preencha todos os campos", "erro");
+      return;
+    }
+
+    try {
+      await apiFetch("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          nome,
+          email,
+          cpf,
+          senha,
+          tipo: "aluno" // 👈 FORÇADO
+        })
+      });
+
+      setMsg("Conta criada com sucesso ✅", "ok");
+
+      setTimeout(() => {
+        window.location.href = "/login.html";
+      }, 600);
+
+    } catch (e) {
+      setMsg(e.message, "erro");
+    }
   }
-}
 
-// ===== Expor funções no escopo global (IMPORTANTE pro onclick) =====
-window.entrar = entrar;
-window.registrar = registrar;
-window.sair = sair;
-window.exigirLogin = exigirLogin;
+  window.entrar = entrar;
+  window.cadastrar = cadastrar;
 
-// ===== Debug útil =====
-document.addEventListener("DOMContentLoaded", () => {
-  // Só pra confirmar que carregou
-  // (se você não quiser, pode remover)
-  // console.log("app.js carregado");
-});
+  console.log("app.js carregado com sucesso 🚀");
+
+})();
