@@ -2,26 +2,23 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Criar conta</title>
-
-  <link rel="stylesheet" href="/css/style.css" />
-  <script defer src="/js/app.js?v=4"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script defer src="/js/app.js"></script>
 </head>
-
 <body>
   <div class="card">
     <h2>Criar conta</h2>
 
-    <div id="msg" class="msg" style="display:none;"></div>
+    <div id="msg" class="msg"></div>
 
-    <input id="nome" class="input" placeholder="Nome completo" />
-    <input id="email" class="input" placeholder="Email" type="email" />
-    <input id="cpf" class="input" placeholder="CPF (somente números)" />
+    <input id="nome" class="input" placeholder="Nome" />
+    <input id="email" class="input" placeholder="Email" />
+    <input id="cpf" class="input" placeholder="CPF (só números)" />
     <input id="senha" class="input" placeholder="Senha" type="password" />
 
     <div class="row">
-      <button type="button" onclick="cadastrar()">✅ Cadastrar</button>
+      <button onclick="cadastrar()">✅ Cadastrar</button>
       <a class="link" href="/login.html">👤 Já tenho conta</a>
     </div>
   </div>
