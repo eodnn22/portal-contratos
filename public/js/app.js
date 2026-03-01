@@ -1,5 +1,5 @@
 // public/js/app.js (COMPLETO)
-const API = 'http://localhost:5000';
+const API = '';
 
 function setMsg(id, text) {
   const el = document.getElementById(id);
