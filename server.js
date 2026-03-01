@@ -1,58 +1,79 @@
 // server.js
-require('dotenv').config();
+// Node + Express + MySQL (Railway) + Auth (JWT)
+// Usa DATABASE_URL do Railway e cria tabela automaticamente.
 
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const jwt = require('jsonwebtoken');
-const multer = require('multer');
-const mysql = require('mysql2/promise');
-const bcrypt = require('bcryptjs');
+const express = require("express");
+const path = require("path");
+const cors = require("cors");
+const mysql = require("mysql2/promise");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'troque_essa_chave';
 
+// ========= Config =========
+const PORT = process.env.PORT || 8080;
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
+const DATABASE_URL = process.env.DATABASE_URL;
+
+// Se você quer 1 admin fixo, defina essas vars no Railway:
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const ADMIN_NAME = process.env.ADMIN_NAME || "Administrador";
+const ADMIN_CPF = process.env.ADMIN_CPF || "00000000000";
+
+// ========= Middlewares =========
 app.use(cors());
-app.use(express.json({ limit: '20mb' })); // para assinatura base64
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "2mb" }));
 
-// -------------------------
-// Pastas estáticas
-// -------------------------
-const publicDir = path.join(__dirname, 'public');
-const uploadsDir = path.join(__dirname, 'uploads');
-const contratosDir = path.join(uploadsDir, 'contratos');
-const assinaturasDir = path.join(uploadsDir, 'assinaturas');
+// Servir arquivos estáticos
+app.use(express.static(path.join(__dirname, "public")));
 
-for (const dir of [uploadsDir, contratosDir, assinaturasDir]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+// ========= DB Pool =========
+if (!DATABASE_URL) {
+  console.error("❌ DATABASE_URL não definida. Configure no Railway -> Variables.");
 }
 
-app.use(express.static(publicDir));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const db = mysql.createPool({
+  uri: DATABASE_URL,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
 
-// -------------------------
-// MySQL
-// -------------------------
-let db;
-
-async function connectDB() {
-  db = await mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASS || '',
-    database: process.env.DB_NAME || 'escola',
-  });
-
-  console.log('MySQL conectado ✅');
-  await ensureSchema();
-  console.log('Schema OK ✅');
+// ========= Helpers =========
+function signToken(user) {
+  // payload enxuto
+  return jwt.sign(
+    { id: user.id, email: user.email, tipo: user.tipo, nome: user.nome },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 }
 
-// cria tabela e colunas necessárias
-async function ensureSchema() {
+function authRequired(req, res, next) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Sem token" });
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (e) {
+    return res.status(401).json({ error: "Token inválido" });
+  }
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.tipo !== "admin") {
+    return res.status(403).json({ error: "Acesso negado" });
+  }
+  next();
+}
+
+// ========= Bootstrap DB =========
+async function initDatabase() {
+  // Cria tabela
   await db.execute(`
     CREATE TABLE IF NOT EXISTS usuarios (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,292 +82,145 @@ async function ensureSchema() {
       cpf VARCHAR(20) NOT NULL UNIQUE,
       senha VARCHAR(255) NOT NULL,
       tipo ENUM('admin','aluno') NOT NULL DEFAULT 'aluno',
-      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      contrato_arquivo VARCHAR(255) NULL,
+      assinatura_arquivo VARCHAR(255) NULL,
+      assinado_em DATETIME NULL
     )
   `);
 
-  // adiciona colunas se não existirem (compatível com MySQL antigo)
-  const cols = await db.query(`
-    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usuarios'
-  `);
+  console.log("✅ Tabela 'usuarios' OK");
 
-  const existing = new Set(cols[0].map(r => r.COLUMN_NAME));
+  // Cria admin automático (se você setou ADMIN_EMAIL e ADMIN_PASSWORD no Railway)
+  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+    const [rows] = await db.execute(
+      "SELECT id, email FROM usuarios WHERE email = ? LIMIT 1",
+      [ADMIN_EMAIL]
+    );
 
-  async function addCol(sql, colName) {
-    if (!existing.has(colName)) {
-      await db.execute(sql);
-      existing.add(colName);
+    if (rows.length === 0) {
+      const hash = await bcrypt.hash(String(ADMIN_PASSWORD), 10);
+      await db.execute(
+        "INSERT INTO usuarios (nome, email, cpf, senha, tipo) VALUES (?, ?, ?, ?, 'admin')",
+        [ADMIN_NAME, ADMIN_EMAIL, ADMIN_CPF, hash]
+      );
+      console.log("✅ Admin criado automaticamente:", ADMIN_EMAIL);
+    } else {
+      console.log("ℹ️ Admin já existe:", ADMIN_EMAIL);
     }
+  } else {
+    console.log(
+      "ℹ️ ADMIN_EMAIL/ADMIN_PASSWORD não definidos. (Opcional) Defina no Railway para criar 1 admin automático."
+    );
   }
-
-  await addCol(`ALTER TABLE usuarios ADD COLUMN contrato_arquivo VARCHAR(255) NULL`, 'contrato_arquivo');
-  await addCol(`ALTER TABLE usuarios ADD COLUMN assinatura_arquivo VARCHAR(255) NULL`, 'assinatura_arquivo');
-  await addCol(`ALTER TABLE usuarios ADD COLUMN assinado_em DATETIME NULL`, 'assinado_em');
 }
 
-// -------------------------
-// Auth helpers
-// -------------------------
-function signToken(user) {
-  return jwt.sign(
-    { id: user.id, tipo: user.tipo, email: user.email, nome: user.nome },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-}
-
-function authRequired(req, res, next) {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  if (!token) return res.status(401).json({ erro: 'Sem token' });
-
+// ========= Rotas =========
+app.get("/health", async (req, res) => {
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
+    await db.execute("SELECT 1");
+    res.json({ ok: true });
   } catch (e) {
-    return res.status(401).json({ erro: 'Token inválido' });
-  }
-}
-
-function requireAdmin(req, res, next) {
-  if (req.user?.tipo !== 'admin') return res.status(403).json({ erro: 'Acesso negado' });
-  next();
-}
-
-function requireAluno(req, res, next) {
-  if (req.user?.tipo !== 'aluno') return res.status(403).json({ erro: 'Acesso negado' });
-  next();
-}
-
-// -------------------------
-// Multer (upload contrato PDF)
-// -------------------------
-const contratoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, contratosDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '.pdf').toLowerCase() || '.pdf';
-    cb(null, `contrato_${req.params.id}_${Date.now()}${ext}`);
-  }
-});
-const uploadContrato = multer({
-  storage: contratoStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype !== 'application/pdf') return cb(new Error('Apenas PDF'));
-    cb(null, true);
+    res.status(500).json({ ok: false, error: "DB offline" });
   }
 });
 
-// -------------------------
-// ROTAS AUTH
-// -------------------------
-app.post('/api/auth/register', async (req, res) => {
+// ----- AUTH -----
+
+// Criar conta (sempre ALUNO)
+app.post("/api/auth/register", async (req, res) => {
   try {
-    const { nome, email, cpf, senha, tipo } = req.body;
+    const { nome, email, cpf, senha } = req.body;
 
     if (!nome || !email || !cpf || !senha) {
-      return res.status(400).json({ erro: 'Preencha nome, email, cpf e senha' });
+      return res.status(400).json({ error: "Preencha nome, email, cpf e senha" });
     }
 
     const hash = await bcrypt.hash(String(senha), 10);
 
     await db.execute(
-      `INSERT INTO usuarios (nome, email, cpf, senha, tipo) VALUES (?, ?, ?, ?, ?)`,
-      [nome, email, cpf, hash, (tipo === 'admin' ? 'admin' : 'aluno')]
+      "INSERT INTO usuarios (nome, email, cpf, senha, tipo) VALUES (?, ?, ?, ?, 'aluno')",
+      [String(nome).trim(), String(email).trim().toLowerCase(), String(cpf).trim(), hash]
     );
 
-    return res.json({ mensagem: 'Conta criada ✅' });
+    return res.json({ message: "Conta criada ✅" });
   } catch (e) {
-    // duplicado
-    if (String(e?.message || '').includes('Duplicate')) {
-      return res.status(400).json({ erro: 'Email ou CPF já cadastrado' });
+    const msg = String(e?.message || "");
+    // erro comum: duplicado
+    if (msg.includes("Duplicate") || msg.includes("ER_DUP_ENTRY")) {
+      return res.status(400).json({ error: "Email ou CPF já cadastrado" });
     }
-    console.error(e);
-    return res.status(500).json({ erro: 'Erro ao cadastrar' });
+    console.error("REGISTER ERROR:", e);
+    return res.status(500).json({ error: "Erro ao cadastrar" });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+// Login
+app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
-    if (!email || !senha) return res.status(400).json({ erro: 'Informe email e senha' });
 
-    const [rows] = await db.execute(`SELECT * FROM usuarios WHERE email = ? LIMIT 1`, [email]);
+    if (!email || !senha) {
+      return res.status(400).json({ error: "Informe email e senha" });
+    }
+
+    const [rows] = await db.execute(
+      "SELECT * FROM usuarios WHERE email = ? LIMIT 1",
+      [String(email).trim().toLowerCase()]
+    );
+
     const user = rows[0];
-    if (!user) return res.status(400).json({ erro: 'Credenciais inválidas' });
+    if (!user) return res.status(400).json({ error: "Credenciais inválidas" });
 
     const ok = await bcrypt.compare(String(senha), String(user.senha));
-    if (!ok) return res.status(400).json({ erro: 'Credenciais inválidas' });
+    if (!ok) return res.status(400).json({ error: "Credenciais inválidas" });
 
     const token = signToken(user);
+
     return res.json({
       token,
-      usuario: { id: user.id, nome: user.nome, email: user.email, cpf: user.cpf, tipo: user.tipo }
+      usuario: {
+        id: user.id,
+        nome: user.nome,
+        email: user.email,
+        cpf: user.cpf,
+        tipo: user.tipo,
+      },
     });
   } catch (e) {
-    console.error(e);
-    return res.status(500).json({ erro: 'Erro ao logar' });
+    console.error("LOGIN ERROR:", e);
+    return res.status(500).json({ error: "Erro ao logar" });
   }
 });
 
-// -------------------------
-// ADMIN: listar usuários
-// (já manda URLs prontas)
-// -------------------------
-app.get('/api/admin/alunos', authRequired, requireAdmin, async (req, res) => {
+// ----- ADMIN (exemplo): listar usuários -----
+app.get("/api/admin/usuarios", authRequired, requireAdmin, async (req, res) => {
   try {
-    const [rows] = await db.execute(`
-      SELECT id, nome, email, cpf, tipo, criado_em,
-             contrato_arquivo, assinatura_arquivo, assinado_em
-      FROM usuarios
-      ORDER BY id DESC
-    `);
-
-    const mapped = rows.map(u => ({
-      ...u,
-      contratoUrl: u.contrato_arquivo ? `/uploads/contratos/${u.contrato_arquivo}` : null,
-      assinaturaUrl: u.assinatura_arquivo ? `/uploads/assinaturas/${u.assinatura_arquivo}` : null
-    }));
-
-    res.json(mapped);
+    const [rows] = await db.execute(
+      "SELECT id, nome, email, cpf, tipo, criado_em FROM usuarios ORDER BY id DESC"
+    );
+    res.json(rows);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ erro: 'Erro ao listar usuários' });
+    console.error("ADMIN LIST ERROR:", e);
+    res.status(500).json({ error: "Erro ao listar" });
   }
 });
 
-// ADMIN: anexar contrato
-app.post('/api/admin/contratos/:id', authRequired, requireAdmin, uploadContrato.single('arquivo'), async (req, res) => {
+// ========= Fallback páginas (se você acessa /login.html etc) =========
+// Se quiser, dá pra manter só estático. Aqui é só pra não quebrar URL.
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// ========= Start =========
+(async () => {
   try {
-    const userId = Number(req.params.id);
-    if (!req.file) return res.status(400).json({ erro: 'Envie um PDF' });
-
-    // pega contrato antigo pra apagar (opcional)
-    const [oldRows] = await db.execute(`SELECT contrato_arquivo FROM usuarios WHERE id = ?`, [userId]);
-    const old = oldRows[0]?.contrato_arquivo;
-
-    await db.execute(`UPDATE usuarios SET contrato_arquivo = ? WHERE id = ?`, [req.file.filename, userId]);
-
-    if (old) {
-      const p = path.join(contratosDir, old);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    }
-
-    res.json({ mensagem: 'Contrato anexado ✅', arquivo: req.file.filename });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ erro: 'Erro ao anexar contrato' });
-  }
-});
-
-// ADMIN: liberar nova assinatura (reset)
-app.post('/api/admin/assinaturas/:id/reset', authRequired, requireAdmin, async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-
-    const [rows] = await db.execute(`SELECT assinatura_arquivo FROM usuarios WHERE id = ?`, [userId]);
-    const old = rows[0]?.assinatura_arquivo;
-
-    await db.execute(`UPDATE usuarios SET assinatura_arquivo = NULL, assinado_em = NULL WHERE id = ?`, [userId]);
-
-    if (old) {
-      const p = path.join(assinaturasDir, old);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    }
-
-    res.json({ mensagem: 'Assinatura liberada ✅' });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ erro: 'Erro ao resetar assinatura' });
-  }
-});
-
-// -------------------------
-// ALUNO: status do contrato (para portal)
-// -------------------------
-app.get('/api/me/status-contrato', authRequired, requireAluno, async (req, res) => {
-  try {
-    const [rows] = await db.execute(`
-      SELECT id, contrato_arquivo, assinatura_arquivo, assinado_em
-      FROM usuarios
-      WHERE id = ?
-      LIMIT 1
-    `, [req.user.id]);
-
-    const u = rows[0];
-    if (!u) return res.status(404).json({ erro: 'Usuário não encontrado' });
-
-    const base = `${req.protocol}://${req.get('host')}`;
-
-    const contratoUrl = u.contrato_arquivo ? `${base}/uploads/contratos/${u.contrato_arquivo}` : null;
-    const assinaturaUrl = u.assinatura_arquivo ? `${base}/uploads/assinaturas/${u.assinatura_arquivo}` : null;
-
-    res.json({
-      contratoUrl,
-      assinaturaUrl,
-      assinadoEm: u.assinado_em,
-      podeAssinar: !!contratoUrl && !assinaturaUrl
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ erro: 'Erro ao buscar status do contrato' });
-  }
-});
-
-// ALUNO: salvar assinatura (base64 do canvas)
-app.post('/api/me/assinar', authRequired, requireAluno, async (req, res) => {
-  try {
-    const { dataUrl } = req.body;
-    if (!dataUrl || !String(dataUrl).startsWith('data:image/png;base64,')) {
-      return res.status(400).json({ erro: 'Assinatura inválida' });
-    }
-
-    // garante que tem contrato e ainda não assinou
-    const [rows] = await db.execute(`
-      SELECT contrato_arquivo, assinatura_arquivo
-      FROM usuarios
-      WHERE id = ?
-      LIMIT 1
-    `, [req.user.id]);
-
-    const u = rows[0];
-    if (!u?.contrato_arquivo) return res.status(400).json({ erro: 'Sem contrato anexado' });
-    if (u?.assinatura_arquivo) return res.status(400).json({ erro: 'Você já assinou' });
-
-    const base64 = String(dataUrl).split(',')[1];
-    const buffer = Buffer.from(base64, 'base64');
-
-    const filename = `assinatura_${req.user.id}_${Date.now()}.png`;
-    const filepath = path.join(assinaturasDir, filename);
-    fs.writeFileSync(filepath, buffer);
-
-    await db.execute(`
-      UPDATE usuarios
-      SET assinatura_arquivo = ?, assinado_em = NOW()
-      WHERE id = ?
-    `, [filename, req.user.id]);
-
-    res.json({
-      mensagem: 'Assinatura salva ✅',
-      assinaturaUrl: `/uploads/assinaturas/${filename}`
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ erro: 'Erro ao assinar' });
-  }
-});
-
-// health
-app.get('/api/health', (req, res) => res.json({ ok: true }));
-
-connectDB()
-  .then(() => {
+    await initDatabase();
     app.listen(PORT, () => {
-      console.log(`Servidor rodando em http://localhost:${PORT} ✅`);
+      console.log(`🚀 Servidor rodando na porta ${PORT}`);
     });
-  })
-  .catch(err => {
-    console.error('Falha ao conectar MySQL:', err);
+  } catch (e) {
+    console.error("❌ Falha ao iniciar:", e);
     process.exit(1);
-  });
+  }
+})();
