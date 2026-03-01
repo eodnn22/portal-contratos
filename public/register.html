@@ -6,7 +6,7 @@
   <title>Criar conta</title>
 
   <link rel="stylesheet" href="/css/style.css" />
-  <script defer src="/js/app.js?v=3"></script>
+  <script defer src="/js/app.js?v=4"></script>
 </head>
 
 <body>
@@ -15,17 +15,10 @@
 
     <div id="msg" class="msg" style="display:none;"></div>
 
-    <input id="nome" class="input" placeholder="Nome" autocomplete="name" />
-    <input id="email" class="input" placeholder="Email" type="email" autocomplete="email" />
-    <input id="cpf" class="input" placeholder="CPF (apenas números)" inputmode="numeric" />
-    <input id="senha" class="input" placeholder="Senha" type="password" autocomplete="new-password" />
-
-    <!-- Se você não quiser escolher tipo, pode remover esse select.
-         O app.js manda "aluno" por padrão se não existir. -->
-    <select id="tipo" class="input">
-      <option value="aluno" selected>Aluno</option>
-      <option value="admin">Admin</option>
-    </select>
+    <input id="nome" class="input" placeholder="Nome completo" />
+    <input id="email" class="input" placeholder="Email" type="email" />
+    <input id="cpf" class="input" placeholder="CPF (somente números)" />
+    <input id="senha" class="input" placeholder="Senha" type="password" />
 
     <div class="row">
       <button type="button" onclick="cadastrar()">✅ Cadastrar</button>
