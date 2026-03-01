@@ -1,212 +1,115 @@
-// server.js
-const express = require("express");
-const path = require("path");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const mysql = require("mysql2/promise");
+require('dotenv').config();
+const express = require('express');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcrypt');
+const path = require('path');
 
 const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
-// ============ CONFIG ============
 const PORT = process.env.PORT || 8080;
 
-// Railway (recomendado): crie uma variável DATABASE_URL no serviço do seu app
-// com valor: ${{ MySQL.MYSQL_URL }}
-const DATABASE_URL = process.env.DATABASE_URL || process.env.MYSQL_URL || "";
+// 🔹 Conexão com Railway
+const pool = mysql.createPool(process.env.MYSQL_URL || process.env.DATABASE_URL);
 
-// Admin único (opcional, mas recomendado)
-// Configure no Railway -> Variables do serviço do APP:
-// ADMIN_EMAIL=admin@escola.com
-// ADMIN_PASSWORD=uma_senha_forte
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
-
-// JWT (pode ser qualquer string no Railway)
-const JWT_SECRET = process.env.JWT_SECRET || "troque_essa_chave_no_railway";
-
-// ============ MIDDLEWARE ============
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Servir front (public/)
-app.use(express.static(path.join(__dirname, "public")));
-
-// ============ MYSQL ============
-let db;
-
-function parseMysqlUrl(url) {
-  // mysql://user:pass@host:port/database
-  const u = new URL(url);
-  return {
-    host: u.hostname,
-    port: Number(u.port || 3306),
-    user: decodeURIComponent(u.username),
-    password: decodeURIComponent(u.password),
-    database: u.pathname.replace("/", ""),
-    // Railway pode exigir SSL dependendo do caso; normalmente Private Network não precisa.
-    // Se der problema de SSL, a gente ajusta.
-  };
-}
-
+// 🔹 Criar tabela automaticamente
 async function initDatabase() {
-  if (!DATABASE_URL) {
-    console.error("❌ DATABASE_URL não definido. Configure no Railway -> Variables.");
-    throw new Error("DATABASE_URL não definido");
-  }
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(100) NOT NULL,
+            email VARCHAR(100) UNIQUE NOT NULL,
+            cpf VARCHAR(20),
+            senha_hash VARCHAR(255) NOT NULL,
+            tipo VARCHAR(10) NOT NULL DEFAULT 'aluno'
+        )
+    `);
 
-  const cfg = parseMysqlUrl(DATABASE_URL);
+    console.log("Tabela 'usuarios' OK");
 
-  db = await mysql.createPool({
-    ...cfg,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-  });
-
-  await db.execute("SELECT 1");
-
-  // cria tabela compatível com seu print
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS usuarios (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      nome VARCHAR(255) NOT NULL,
-      email VARCHAR(255) NOT NULL UNIQUE,
-      cpf VARCHAR(20) NOT NULL UNIQUE,
-      senha_hash VARCHAR(255) NOT NULL
-    )
-  `);
-
-  console.log("✅ Tabela 'usuarios' OK");
-
-  // cria admin automático (se configurado)
-  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
-    const [rows] = await db.execute(
-      "SELECT id FROM usuarios WHERE email = ? LIMIT 1",
-      [ADMIN_EMAIL]
+    // 🔥 Criar admin fixo se não existir
+    const [admin] = await pool.execute(
+        "SELECT * FROM usuarios WHERE email = ?",
+        ['admin01@escola.com']
     );
 
-    if (rows.length === 0) {
-      const hash = await bcrypt.hash(String(ADMIN_PASSWORD), 10);
-      await db.execute(
-        "INSERT INTO usuarios (nome, email, cpf, senha_hash) VALUES (?, ?, ?, ?)",
-        ["Admin Escola", ADMIN_EMAIL, "00000000000", hash]
-      );
-      console.log("✅ Admin criado automaticamente:", ADMIN_EMAIL);
-    } else {
-      console.log("ℹ️ Admin já existe:", ADMIN_EMAIL);
+    if (admin.length === 0) {
+        const hash = await bcrypt.hash('123456', 10);
+
+        await pool.execute(
+            "INSERT INTO usuarios (nome, email, cpf, senha_hash, tipo) VALUES (?, ?, ?, ?, ?)",
+            ['Admin Escola', 'admin01@escola.com', '00000000000', hash, 'admin']
+        );
+
+        console.log("Admin criado: admin01@escola.com / senha: 123456");
     }
-  } else {
-    console.log("ℹ️ ADMIN_EMAIL/ADMIN_PASSWORD não definidos (opcional).");
-  }
 }
 
-function signToken(user) {
-  return jwt.sign(
-    { id: user.id, email: user.email },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  );
-}
+initDatabase();
 
-function isAdminEmail(email) {
-  return ADMIN_EMAIL && email && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-}
 
-// ============ ROTAS AUTH ============
+// 🔹 REGISTER
+app.post('/api/register', async (req, res) => {
+    try {
+        const { nome, email, cpf, senha } = req.body;
 
-// Cadastro (sempre cria aluno; admin é só por email configurado)
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const nome = String(req.body.nome || "").trim();
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const cpf = String(req.body.cpf || "").trim();
-    const senha = String(req.body.senha || "");
+        const hash = await bcrypt.hash(senha, 10);
 
-    if (!nome || !email || !cpf || !senha) {
-      return res.status(400).json({ erro: "Preencha nome, email, cpf e senha" });
+        await pool.execute(
+            "INSERT INTO usuarios (nome, email, cpf, senha_hash, tipo) VALUES (?, ?, ?, ?, 'aluno')",
+            [nome, email, cpf, hash]
+        );
+
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error("REGISTER ERROR:", error);
+        res.status(500).json({ error: 'Erro ao cadastrar' });
     }
-
-    // regra: não permitir cadastro do email do admin pelo formulário
-    if (isAdminEmail(email)) {
-      return res.status(403).json({ erro: "Esse email é reservado ao admin." });
-    }
-
-    const hash = await bcrypt.hash(senha, 10);
-
-    await db.execute(
-      "INSERT INTO usuarios (nome, email, cpf, senha_hash) VALUES (?, ?, ?, ?)",
-      [nome, email, cpf, hash]
-    );
-
-    return res.json({ mensagem: "Conta criada ✅" });
-  } catch (e) {
-    // duplicado
-    const msg = String(e?.message || "");
-    if (msg.includes("Duplicate") || msg.includes("ER_DUP_ENTRY")) {
-      return res.status(400).json({ erro: "Email ou CPF já cadastrado" });
-    }
-    console.error("REGISTER ERROR:", e);
-    return res.status(500).json({ erro: "Erro ao cadastrar" });
-  }
 });
 
-// Login
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const email = String(req.body.email || "").trim().toLowerCase();
-    const senha = String(req.body.senha || "");
 
-    if (!email || !senha) {
-      return res.status(400).json({ erro: "Informe email e senha" });
+// 🔹 LOGIN
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, senha } = req.body;
+
+        const [rows] = await pool.execute(
+            "SELECT * FROM usuarios WHERE email = ?",
+            [email]
+        );
+
+        if (rows.length === 0) {
+            return res.status(401).json({ error: 'Credenciais inválidas' });
+        }
+
+        const user = rows[0];
+
+        const senhaValida = await bcrypt.compare(senha, user.senha_hash);
+
+        if (!senhaValida) {
+            return res.status(401).json({ error: 'Credenciais inválidas' });
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                nome: user.nome,
+                email: user.email,
+                tipo: user.tipo
+            }
+        });
+
+    } catch (error) {
+        console.error("LOGIN ERROR:", error);
+        res.status(500).json({ error: 'Erro no login' });
     }
-
-    const [rows] = await db.execute(
-      "SELECT id, nome, email, cpf, senha_hash FROM usuarios WHERE email = ? LIMIT 1",
-      [email]
-    );
-
-    const user = rows[0];
-    if (!user) return res.status(400).json({ erro: "Credenciais inválidas" });
-
-    const ok = await bcrypt.compare(String(senha), String(user.senha_hash));
-    if (!ok) return res.status(400).json({ erro: "Credenciais inválidas" });
-
-    const token = signToken(user);
-
-    return res.json({
-      token,
-      usuario: {
-        id: user.id,
-        nome: user.nome,
-        email: user.email,
-        cpf: user.cpf,
-        admin: isAdminEmail(user.email),
-      },
-    });
-  } catch (e) {
-    console.error("LOGIN ERROR:", e);
-    return res.status(500).json({ erro: "Erro ao logar" });
-  }
 });
 
-// Health
-app.get("/api/health", async (req, res) => {
-  try {
-    await db.execute("SELECT 1");
-    res.json({ ok: true });
-  } catch {
-    res.status(500).json({ ok: false });
-  }
-});
 
-// ============ START ============
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 Servidor rodando na porta ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error("❌ Falha ao iniciar:", err);
-    process.exit(1);
-  });
+// 🔹 Servidor
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
