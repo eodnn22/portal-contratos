@@ -1,11 +1,24 @@
-// =======================
-// Helpers
-// =======================
-function setMsg(texto, tipo = "erro") {
-  const el = document.getElementById("msg");
+/* =========================================
+   CONFIG
+========================================= */
+const API_BASE = ""; // vazio = mesma URL do site (Railway). Ex: /api/login
+
+/* =========================================
+   HELPERS
+========================================= */
+function $(id) {
+  return document.getElementById(id);
+}
+
+function setMsg(texto = "", tipo = "") {
+  const el = $("msg");
   if (!el) return;
   el.textContent = texto || "";
   el.className = "msg " + (tipo || "");
+}
+
+function saveUser(user) {
+  localStorage.setItem("user", JSON.stringify(user));
 }
 
 function getUser() {
@@ -16,19 +29,28 @@ function getUser() {
   }
 }
 
-// apiFetch usado pelo portal/aluno/admin (corrige "apiFetch is not defined")
-async function apiFetch(url, options = {}) {
+function clearUser() {
+  localStorage.removeItem("user");
+}
+
+/* =========================================
+   apiFetch (corrige "apiFetch is not defined")
+========================================= */
+async function apiFetch(path, options = {}) {
+  const url = API_BASE + path;
+
   const opts = {
-    method: "GET",
+    method: options.method || "GET",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {})
     },
-    ...options
+    body: options.body
   };
 
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
+
   if (!res.ok) {
     const msg = data.error || data.message || `Erro HTTP ${res.status}`;
     throw new Error(msg);
@@ -36,30 +58,37 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
-// =======================
-// Auth actions
-// =======================
+/* =========================================
+   AUTH
+========================================= */
 async function entrar() {
   try {
     setMsg("");
 
-    const email = (document.getElementById("email")?.value || "").trim();
-    const senha = (document.getElementById("senha")?.value || "").trim();
+    const email = ($("email")?.value || "").trim();
+    const senha = ($("senha")?.value || "").trim();
 
-    if (!email || !senha) return setMsg("Preencha email e senha.");
+    if (!email || !senha) {
+      return setMsg("Preencha email e senha.");
+    }
 
-    const data = await apiFetch("/api/login", {
+    // server.js mostra rota /api/auth/login no print, então usamos ela:
+    const data = await apiFetch("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, senha })
     });
 
-    localStorage.setItem("user", JSON.stringify(data.user));
+    // servidor retorna { token, usuario: {...} } no teu print do server.js
+    const usuario = data.usuario || data.user;
+    if (!usuario) throw new Error("Resposta inválida do servidor.");
 
-    if (data.user.tipo === "admin") window.location.href = "/admin.html";
+    saveUser(usuario);
+
+    if (usuario.tipo === "admin") window.location.href = "/admin.html";
     else window.location.href = "/portal.html";
   } catch (e) {
     console.error(e);
-    setMsg(e.message || "Falha ao conectar no servidor.");
+    setMsg(e.message || "Falha ao entrar.");
   }
 }
 
@@ -67,56 +96,67 @@ async function cadastrar() {
   try {
     setMsg("");
 
-    const nome = (document.getElementById("nome")?.value || "").trim();
-    const email = (document.getElementById("email")?.value || "").trim();
-    const cpf = (document.getElementById("cpf")?.value || "").trim();
-    const senha = (document.getElementById("senha")?.value || "").trim();
+    const nome = ($("nome")?.value || "").trim();
+    const email = ($("email")?.value || "").trim();
+    const cpf = ($("cpf")?.value || "").trim();
+    const senha = ($("senha")?.value || "").trim();
 
     if (!nome || !email || !cpf || !senha) {
       return setMsg("Preencha nome, email, cpf e senha.");
     }
 
-    await apiFetch("/api/register", {
+    // Sem escolher tipo: o backend decide aluno por padrão
+    const payload = { nome, email, cpf, senha };
+
+    const data = await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ nome, email, cpf, senha })
+      body: JSON.stringify(payload)
     });
 
-    setMsg("Cadastro realizado! Indo para o login...", "ok");
-    setTimeout(() => (window.location.href = "/login.html"), 800);
+    setMsg(data.mensagem || "Conta criada ✅", "ok");
+    setTimeout(() => (window.location.href = "/login.html"), 900);
   } catch (e) {
     console.error(e);
     setMsg(e.message || "Erro ao cadastrar.");
   }
 }
 
-// Sair (admin e aluno)
+/* =========================================
+   LOGOUT (Sair)
+========================================= */
 function sair() {
-  localStorage.removeItem("user");
+  clearUser();
   window.location.href = "/login.html";
 }
 
-// Alias caso seu HTML esteja chamando logout()
+// caso algum HTML chame logout()
 function logout() {
   sair();
 }
 
-// =======================
-// Auto-wire botão Sair
-// =======================
+/* =========================================
+   AUTOWIRE BOTÃO SAIR
+========================================= */
 function wireLogoutButtons() {
-  // tenta achar qualquer botão/elemento com id ou classe de sair
-  const candidates = [
-    document.getElementById("btnSair"),
-    document.getElementById("sair"),
-    document.getElementById("logout"),
+  const els = [
+    $("btnSair"),
+    $("sair"),
+    $("logout"),
     ...document.querySelectorAll("[data-logout]"),
-    ...document.querySelectorAll(".btn-sair"),
-    ...document.querySelectorAll("button")
+    ...document.querySelectorAll(".btn-sair")
   ].filter(Boolean);
 
-  candidates.forEach((el) => {
-    const txt = (el.textContent || "").toLowerCase();
-    if (el.id === "btnSair" || el.id === "sair" || el.id === "logout" || el.hasAttribute("data-logout") || txt.includes("sair")) {
+  els.forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      sair();
+    });
+  });
+
+  // fallback: se tiver um botão com texto "Sair"
+  document.querySelectorAll("button,a").forEach((el) => {
+    const t = (el.textContent || "").trim().toLowerCase();
+    if (t === "sair") {
       el.addEventListener("click", (ev) => {
         ev.preventDefault();
         sair();
@@ -125,28 +165,28 @@ function wireLogoutButtons() {
   });
 }
 
-// =======================
-// Guards (opcional)
-// =======================
+/* =========================================
+   GUARDAS (impede abrir portal/admin sem login)
+========================================= */
 function guardAuth() {
   const u = getUser();
   const path = location.pathname;
 
-  // páginas que precisam login
-  const needsLogin = ["/portal.html", "/admin.html", "/buscar-contrato.html"];
+  const needsLogin = ["/portal.html", "/admin.html"];
   if (needsLogin.includes(path) && !u) {
     window.location.href = "/login.html";
     return;
   }
 
-  // impede aluno de abrir admin.html
   if (path === "/admin.html" && u && u.tipo !== "admin") {
     window.location.href = "/portal.html";
     return;
   }
 }
 
-// roda sempre
+/* =========================================
+   INIT
+========================================= */
 document.addEventListener("DOMContentLoaded", () => {
   guardAuth();
   wireLogoutButtons();
