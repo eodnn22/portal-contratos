@@ -2,45 +2,26 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Login</title>
-  <link rel="stylesheet" href="/css/style.css">
-  <script defer src="/js/app.js"></script>
+
+  <link rel="stylesheet" href="/css/style.css" />
+  <script defer src="/js/app.js?v=3"></script>
 </head>
+
 <body>
   <div class="card">
     <h2>Login</h2>
 
-    <div id="msg" class="msg"></div>
+    <div id="msg" class="msg" style="display:none;"></div>
 
-    <input id="email" class="input" placeholder="Email" />
-    <input id="senha" class="input" placeholder="Senha" type="password" />
+    <input id="email" class="input" placeholder="Email" type="email" autocomplete="email" />
+    <input id="senha" class="input" placeholder="Senha" type="password" autocomplete="current-password" />
 
     <div class="row">
-      <button onclick="entrar()">🔐 Entrar</button>
-      <a class="btn" href="/register.html">➕ Criar conta</a>
+      <button type="button" onclick="entrar()">🔐 Entrar</button>
+      <a class="link" href="/register.html">➕ Criar conta</a>
     </div>
   </div>
-
-<script>
-  async function entrar() {
-    setMsg('msg','');
-    const email = document.getElementById('email').value.trim();
-    const senha = document.getElementById('senha').value;
-
-    try {
-      const data = await apiFetch(`/api/auth/login`, { 'Content-Type':'application/json' },
-        body: JSON.stringify({ email, senha })
-      });
-
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('usuario', JSON.stringify(data.usuario));
-
-      if (data.usuario.tipo === 'admin') location.href = '/admin.html';
-      else location.href = '/portal.html';
-    } catch (e) {
-      setMsg('msg', e.message || 'Erro ao logar');
-    }
-  }
-</script>
 </body>
 </html>
