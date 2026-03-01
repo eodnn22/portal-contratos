@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Buscar Contrato</title>
+</head>
+<body>
+
+<h2>Buscar contrato pelo CPF</h2>
+
+<input type="text" id="cpf" placeholder="Digite seu CPF">
+<button onclick="buscarContrato()">Buscar</button>
+
+<div id="resultado"></div>
+
+<script>
+async function buscarContrato() {
+    const cpf = document.getElementById('cpf').value;
+
+    const resposta = await fetch('http://localhost:3000/buscar-contrato', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ cpf })
+    });
+
+    const dados = await resposta.json();
+
+    if (dados.erro) {
+        document.getElementById('resultado').innerHTML = "Contrato não encontrado.";
+    } else {
+        document.getElementById('resultado').innerHTML =
+            `<a href="http://localhost:3000/uploads/${dados.arquivo}" target="_blank">
+                Ver Contrato
+            </a>`;
+    }
+}
+</script>
+
+</body>
+</html>

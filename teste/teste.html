@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste API</title>
+</head>
+<body>
+
+<h2>Cadastrar Aluno</h2>
+
+<input type="text" id="nome" placeholder="Nome"><br><br>
+<input type="email" id="email" placeholder="Email"><br><br>
+<input type="number" id="idade" placeholder="Idade"><br><br>
+
+<button onclick="cadastrar()">Cadastrar</button>
+
+<h3>Resultado:</h3>
+<pre id="resultado"></pre>
+
+<script>
+function cadastrar() {
+    const nome = document.getElementById('nome').value;
+    const email = document.getElementById('email').value;
+    const idade = document.getElementById('idade').value;
+
+    fetch('http://localhost:5000/alunos', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ nome, email, idade })
+    })
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById('resultado').innerText = JSON.stringify(data, null, 2);
+    })
+    .catch(err => {
+        document.getElementById('resultado').innerText = 'Erro: ' + err;
+    });
+}
+</script>
+
+</body>
+</html>
