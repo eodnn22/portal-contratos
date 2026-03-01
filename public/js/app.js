@@ -1,145 +1,105 @@
-// app.js FINAL CORRIGIDO
-(function () {
+// public/js/app.js
 
-  const API = ""; // Railway usa mesma origem
+const API = ""; // mesma origem (Railway), não precisa colocar URL
 
-  function getEl(id) {
-    return document.getElementById(id);
+function qs(id) {
+  return document.getElementById(id);
+}
+
+function setMsg(texto, tipo = "erro") {
+  const el = qs("msg");
+  if (!el) return;
+
+  el.textContent = texto || "";
+  el.classList.remove("erro", "sucesso");
+
+  if (texto) {
+    el.classList.add(tipo === "sucesso" ? "sucesso" : "erro");
+  }
+}
+
+async function apiFetch(url, options = {}) {
+  const res = await fetch(API + url, {
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    // se não vier json, deixa null
   }
 
-  function setMsg(texto = "", tipo = "") {
-    const el = getEl("msg");
-    if (!el) return;
-
-    el.className = "msg";
-
-    const t = String(texto ?? "").trim();
-    el.textContent = t;
-
-    if (!t) {
-      el.style.display = "none";
-      return;
-    }
-
-    el.style.display = "block";
-
-    if (tipo && String(tipo).trim() !== "") {
-      el.classList.add(String(tipo).trim());
-    }
+  if (!res.ok) {
+    const msg = data?.erro || data?.message || `Erro HTTP ${res.status}`;
+    throw new Error(msg);
   }
+  return data;
+}
 
-  async function apiFetch(path, options = {}) {
-    const res = await fetch(API + path, {
-      method: options.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      },
-      body: options.body
-    });
-
-    const raw = await res.text();
-    let data = {};
-
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
-      data = { message: raw };
-    }
-
-    if (!res.ok) {
-      throw new Error(
-        data?.erro ||
-        data?.error ||
-        data?.message ||
-        `Erro HTTP ${res.status}`
-      );
-    }
-
-    return data;
-  }
-
-  // =========================
-  // LOGIN
-  // =========================
-  async function entrar() {
+// ===== LOGIN =====
+async function entrar() {
+  try {
     setMsg("");
 
-    const email = getEl("email")?.value?.trim();
-    const senha = getEl("senha")?.value?.trim();
+    const email = String(qs("email")?.value || "").trim();
+    const senha = String(qs("senha")?.value || "");
 
     if (!email || !senha) {
-      setMsg("Informe email e senha", "erro");
+      setMsg("Preencha email e senha.");
       return;
     }
 
-    try {
-      const data = await apiFetch("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, senha })
-      });
+    const data = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, senha }),
+    });
 
-      if (data?.token) {
-        localStorage.setItem("token", data.token);
-      }
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("usuario", JSON.stringify(data.usuario));
 
-      setMsg("Login realizado ✅", "ok");
-
-      setTimeout(() => {
-        if (data?.usuario?.tipo === "admin") {
-          window.location.href = "/admin.html";
-        } else {
-          window.location.href = "/portal.html";
-        }
-      }, 400);
-
-    } catch (e) {
-      setMsg(e.message, "erro");
-    }
+    // redireciona
+    window.location.href = "/portal.html";
+  } catch (e) {
+    setMsg(e.message || "Erro ao logar");
   }
+}
 
-  // =========================
-  // CADASTRO
-  // =========================
-  async function cadastrar() {
+// ===== CADASTRO =====
+async function cadastrar() {
+  try {
     setMsg("");
 
-    const nome = getEl("nome")?.value?.trim();
-    const email = getEl("email")?.value?.trim();
-    const cpf = getEl("cpf")?.value?.trim();
-    const senha = getEl("senha")?.value?.trim();
+    const nome = String(qs("nome")?.value || "").trim();
+    const email = String(qs("email")?.value || "").trim();
+    const cpf = String(qs("cpf")?.value || "").trim();
+    const senha = String(qs("senha")?.value || "");
 
     if (!nome || !email || !cpf || !senha) {
-      setMsg("Preencha todos os campos", "erro");
+      setMsg("Preencha nome, email, cpf e senha.");
       return;
     }
 
-    try {
-      await apiFetch("/api/auth/register", {
-        method: "POST",
-        body: JSON.stringify({
-          nome,
-          email,
-          cpf,
-          senha,
-          tipo: "aluno" // 👈 FORÇADO
-        })
-      });
+    await apiFetch("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ nome, email, cpf, senha }),
+    });
 
-      setMsg("Conta criada com sucesso ✅", "ok");
+    setMsg("Conta criada ✅ Agora faça login.", "sucesso");
 
-      setTimeout(() => {
-        window.location.href = "/login.html";
-      }, 600);
-
-    } catch (e) {
-      setMsg(e.message, "erro");
-    }
+    // opcional: mandar pro login após 800ms
+    setTimeout(() => {
+      window.location.href = "/login.html";
+    }, 800);
+  } catch (e) {
+    setMsg(e.message || "Erro ao cadastrar");
   }
+}
 
-  window.entrar = entrar;
-  window.cadastrar = cadastrar;
+// deixa as funções disponíveis pro onclick do HTML
+window.entrar = entrar;
+window.cadastrar = cadastrar;
 
-  console.log("app.js carregado com sucesso 🚀");
-
-})();
+// só pra confirmar que carregou
+console.log("app.js carregado com sucesso ✅");
