@@ -28,9 +28,7 @@
     const senha = document.getElementById('senha').value;
 
     try {
-      const data = await apiFetch(`${API}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
+      const data = await apiFetch(`/api/auth/login`, { 'Content-Type':'application/json' },
         body: JSON.stringify({ email, senha })
       });
 
