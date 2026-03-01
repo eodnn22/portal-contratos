@@ -2,48 +2,35 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Criar conta</title>
-  <link rel="stylesheet" href="/css/style.css">
-  <script defer src="/js/app.js"></script>
+
+  <link rel="stylesheet" href="/css/style.css" />
+  <script defer src="/js/app.js?v=3"></script>
 </head>
+
 <body>
   <div class="card">
     <h2>Criar conta</h2>
 
-    <div id="msg" class="msg"></div>
+    <div id="msg" class="msg" style="display:none;"></div>
 
-    <input id="nome" class="input" placeholder="Nome" />
-    <input id="email" class="input" placeholder="Email" />
-    <input id="cpf" class="input" placeholder="CPF (opcional)" />
-    <input id="senha" class="input" placeholder="Senha" type="password" />
+    <input id="nome" class="input" placeholder="Nome" autocomplete="name" />
+    <input id="email" class="input" placeholder="Email" type="email" autocomplete="email" />
+    <input id="cpf" class="input" placeholder="CPF (apenas números)" inputmode="numeric" />
+    <input id="senha" class="input" placeholder="Senha" type="password" autocomplete="new-password" />
+
+    <!-- Se você não quiser escolher tipo, pode remover esse select.
+         O app.js manda "aluno" por padrão se não existir. -->
+    <select id="tipo" class="input">
+      <option value="aluno" selected>Aluno</option>
+      <option value="admin">Admin</option>
+    </select>
 
     <div class="row">
-      <button onclick="cadastrar()">✅ Cadastrar</button>
-      <a class="btn" href="/login.html">👤 Já tenho conta</a>
+      <button type="button" onclick="cadastrar()">✅ Cadastrar</button>
+      <a class="link" href="/login.html">👤 Já tenho conta</a>
     </div>
   </div>
-
-<script>
-  async function cadastrar() {
-    setMsg('msg','');
-    const nome = document.getElementById('nome').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const cpf = document.getElementById('cpf').value.trim();
-    const senha = document.getElementById('senha').value;
-
-    try {
-      const data = await apiFetch(`${API}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ nome, email, cpf, senha, tipo: 'aluno' })
-      });
-
-      setMsg('msg', data.mensagem || 'Conta criada ✅');
-      setTimeout(() => location.href = '/login.html', 700);
-    } catch (e) {
-      setMsg('msg', e.message || 'Erro ao cadastrar');
-    }
-  }
-</script>
 </body>
 </html>
