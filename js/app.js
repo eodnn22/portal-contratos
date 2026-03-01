@@ -1,70 +1,77 @@
-/* public/js/app.js
-   Sem "export". Funções globais para usar direto no onclick do HTML.
-*/
+// public/js/app.js
+// Front do Portal Contratos (login + cadastro)
+// Sem "export" e com tratamento de erro robusto
 
 (function () {
-  // -------------------------
-  // Helpers
-  // -------------------------
-  function $(sel) {
-    return document.querySelector(sel);
+  const API = ""; // mesmo domínio (Railway). Se precisar apontar pra outro, coloque a URL aqui.
+
+  function $(id) {
+    return document.getElementById(id);
   }
 
-  function setMsg(text, type = "erro") {
-    const el = $("#msg");
+  function setMsg(texto, tipo) {
+    const el = $("msg");
     if (!el) return;
 
-    el.textContent = text || "";
-    el.style.display = text ? "block" : "none";
+    // limpa classes anteriores comuns
+    el.classList.remove("ok", "erro", "warn", "success", "danger");
 
-    // opcional: estilos simples
-    el.style.padding = text ? "10px" : "";
-    el.style.margin = text ? "10px 0" : "";
-    el.style.borderRadius = text ? "8px" : "";
-    el.style.fontSize = "14px";
+    // garante string
+    const t = String(texto ?? "").trim();
+    el.textContent = t;
 
-    if (!text) return;
-
-    if (type === "ok") {
-      el.style.background = "#e7f7ed";
-      el.style.border = "1px solid #b7ebc6";
-      el.style.color = "#155724";
-    } else {
-      el.style.background = "#fdecea";
-      el.style.border = "1px solid #f5c6cb";
-      el.style.color = "#721c24";
+    // se não tiver texto, some com a mensagem
+    if (!t) {
+      el.style.display = "none";
+      return;
     }
+
+    el.style.display = "block";
+
+    // tipo opcional (não pode ser vazio)
+    const cls = String(tipo ?? "").trim();
+    if (cls) el.classList.add(cls);
   }
 
-  async function apiFetch(path, { method = "GET", body, auth = true } = {}) {
-    const headers = { "Content-Type": "application/json" };
+  async function apiFetch(path, options = {}) {
+    const url = API + path;
 
-    if (auth) {
-      const token = localStorage.getItem("token");
-      if (token) headers.Authorization = `Bearer ${token}`;
+    const opts = {
+      method: options.method || "GET",
+      headers: {
+        ...(options.headers || {}),
+      },
+      body: options.body,
+    };
+
+    // se body for objeto, envia JSON automaticamente
+    if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(opts.body);
     }
 
-    const res = await fetch(path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch(url, opts);
+    } catch (e) {
+      // Falha de rede / CORS / servidor fora
+      throw new Error("Falha de rede (Failed to fetch). Verifique se o servidor está online.");
+    }
 
-    // tenta ler JSON, mas se não vier JSON, pega texto
-    const contentType = res.headers.get("content-type") || "";
+    // tenta ler JSON, mas se não vier JSON não quebra
     let data = null;
-
-    if (contentType.includes("application/json")) {
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
       data = await res.json().catch(() => null);
     } else {
       const txt = await res.text().catch(() => "");
-      data = txt ? { error: txt } : null;
+      data = txt ? { message: txt } : null;
     }
 
     if (!res.ok) {
       const msg =
-        (data && (data.error || data.message)) ||
-        `Erro HTTP ${res.status} (${res.statusText})`;
+        (data && (data.erro || data.error || data.message)) ||
+        `Erro HTTP ${res.status}`;
       const err = new Error(msg);
       err.status = res.status;
       err.data = data;
@@ -74,101 +81,86 @@
     return data;
   }
 
-  function redirectTo(url) {
-    window.location.href = url;
-  }
-
-  // -------------------------
-  // AUTH (LOGIN / REGISTER)
-  // -------------------------
-  window.entrar = async function entrar() {
+  // ===== LOGIN =====
+  async function entrar() {
     setMsg("");
 
-    const emailEl = $("#email");
-    const senhaEl = $("#senha");
-
-    const email = (emailEl?.value || "").trim();
-    const senha = (senhaEl?.value || "").trim();
+    const email = ($("email")?.value || "").trim();
+    const senha = ($("senha")?.value || "").trim();
 
     if (!email || !senha) {
-      setMsg("Preencha email e senha.");
+      setMsg("Preencha email e senha.", "erro");
       return;
     }
 
     try {
-      // Importante: usar rota relativa (mesmo domínio do Railway)
       const data = await apiFetch("/api/auth/login", {
         method: "POST",
         body: { email, senha },
-        auth: false,
       });
 
-      // server.js retorna { token, usuario: {...} }
+      // salva token se vier
       if (data?.token) localStorage.setItem("token", data.token);
       if (data?.usuario) localStorage.setItem("usuario", JSON.stringify(data.usuario));
 
       setMsg("Login OK ✅", "ok");
 
-      // se tiver "tipo", manda pro admin ou portal
+      // redireciona conforme tipo (se existir)
       const tipo = data?.usuario?.tipo;
-      if (tipo === "admin") redirectTo("/admin.html");
-      else redirectTo("/portal.html");
+      setTimeout(() => {
+        if (tipo === "admin") window.location.href = "/admin.html";
+        else window.location.href = "/portal.html";
+      }, 300);
     } catch (e) {
-      setMsg(e.message || "Falha no login.");
+      // 400 costuma ser credenciais inválidas
+      setMsg(e.message || "Erro ao logar.", "erro");
     }
-  };
+  }
 
-  window.cadastrar = async function cadastrar() {
+  // ===== CADASTRO =====
+  async function cadastrar() {
     setMsg("");
 
-    // ids esperados na sua tela de register (ajuste se seus inputs tiverem outros ids)
-    const nome = ($("#nome")?.value || "").trim();
-    const email = ($("#email")?.value || "").trim();
-    const cpf = ($("#cpf")?.value || "").trim();
-    const senha = ($("#senha")?.value || "").trim();
+    const nome = ($("nome")?.value || "").trim();
+    const email = ($("email")?.value || "").trim();
+    const cpfRaw = ($("cpf")?.value || "").trim();
+    const senha = ($("senha")?.value || "").trim();
 
-    // tipo pode ser select/radio; se não existir, manda "aluno"
-    const tipoEl = $("#tipo");
-    const tipo = (tipoEl?.value || "aluno").trim();
+    // "tipo" pode existir como input/select; se não existir, assume aluno
+    let tipo = ($("tipo")?.value || "").trim();
+    if (!tipo) tipo = "aluno";
+
+    const cpf = cpfRaw.replace(/\D/g, ""); // só números
 
     if (!nome || !email || !cpf || !senha) {
-      setMsg("Preencha nome, email, CPF e senha.");
+      setMsg("Preencha nome, email, CPF e senha.", "erro");
+      return;
+    }
+    if (cpf.length < 11) {
+      setMsg("CPF inválido (precisa ter 11 números).", "erro");
       return;
     }
 
     try {
-      const data = await apiFetch("/api/auth/register", {
+      await apiFetch("/api/auth/register", {
         method: "POST",
         body: { nome, email, cpf, senha, tipo },
-        auth: false,
       });
 
-      setMsg(data?.mensagem || "Conta criada ✅", "ok");
+      setMsg("Conta criada ✅ Agora faça login.", "ok");
 
-      // após cadastrar, manda pro login
-      setTimeout(() => redirectTo("/login.html"), 600);
+      setTimeout(() => {
+        window.location.href = "/login.html";
+      }, 500);
     } catch (e) {
-      setMsg(e.message || "Erro ao cadastrar.");
+      setMsg(e.message || "Erro ao cadastrar.", "erro");
     }
-  };
+  }
 
-  window.sair = function sair() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("usuario");
-    redirectTo("/login.html");
-  };
+  // deixa as funções no escopo global (para onclick do HTML)
+  window.entrar = entrar;
+  window.cadastrar = cadastrar;
 
-  // -------------------------
-  // (Opcional) Proteção simples de páginas
-  // Se você quiser: nas páginas admin/portal, chama requireLogin() no onload.
-  // -------------------------
-  window.requireLogin = function requireLogin() {
-    const token = localStorage.getItem("token");
-    if (!token) redirectTo("/login.html");
-  };
-
-  // -------------------------
-  // Debug: mostra que carregou
-  // -------------------------
-  console.log("app.js carregado ✅");
+  // se quiser, ao carregar a página, limpa msg
+  document.addEventListener("DOMContentLoaded", () => setMsg(""));
 })();
