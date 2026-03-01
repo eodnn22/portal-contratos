@@ -1,166 +1,57 @@
 <!doctype html>
 <html lang="pt-br">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Painel Admin</title>
   <link rel="stylesheet" href="/css/style.css">
   <script defer src="/js/app.js"></script>
 </head>
 <body>
-  <div class="card">
-    <h2>Painel Administrativo</h2>
 
-    <div class="row">
-      <button onclick="carregarUsuarios()">🔄 Atualizar</button>
-      <button class="danger" onclick="logout()">🚪 Sair</button>
-    </div>
+<div class="card">
+  <h2>Painel do Administrador</h2>
 
-    <input id="busca" class="input" placeholder="Buscar por nome, email ou CPF..." oninput="renderLista()" />
+  <div id="msg" class="msg"></div>
 
-    <div class="row small" style="justify-content: space-between; margin-top: 8px;">
-      <div>Total: <b id="total">0</b></div>
-      <div>Admins: <b id="admins">0</b></div>
-      <div>Alunos: <b id="alunos">0</b></div>
-    </div>
+  <p><strong>Bem-vindo, <span id="nomeAdmin"></span></strong></p>
 
-    <div id="msg" class="msg"></div>
-    <ul id="lista" class="list"></ul>
-  </div>
+  <hr>
+
+  <h3>Usuários cadastrados</h3>
+  <div id="listaUsuarios"></div>
+
+  <br>
+
+  <button id="btnSair" type="button">Sair</button>
+</div>
 
 <script>
-  // garante que só admin entra
-  try { requireAdmin(); } catch (e) {
-    document.getElementById('msg').innerText = 'Erro: app.js não carregou.';
-  }
+document.addEventListener("DOMContentLoaded", async () => {
+  const user = JSON.parse(localStorage.getItem("user"));
+  if (!user) return window.location.href = "/login.html";
 
-  let usuariosCache = [];
+  document.getElementById("nomeAdmin").textContent = user.nome;
 
-  function esc(s) {
-    return String(s ?? '').replace(/[&<>"']/g, m => ({
-      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-    }[m]));
-  }
+  try {
+    const data = await apiFetch("/api/admin/usuarios");
+    const lista = document.getElementById("listaUsuarios");
 
-  function badge(ok, textOk, textNo) {
-    return ok
-      ? `<span class="small">✅ ${esc(textOk)}</span>`
-      : `<span class="small">⚠️ ${esc(textNo)}</span>`;
-  }
+    lista.innerHTML = "";
 
-  async function carregarUsuarios() {
-    setMsg('msg', 'Carregando...');
-    try {
-      const data = await apiFetch(`${API}/api/admin/alunos`);
-      usuariosCache = Array.isArray(data) ? data : [];
-      setMsg('msg', `Usuários carregados: ${usuariosCache.length} ✅`);
-      renderResumo();
-      renderLista();
-    } catch (e) {
-      setMsg('msg', 'Erro ao listar usuários');
-      console.log(e);
-    }
-  }
-
-  function renderResumo() {
-    const total = usuariosCache.length;
-    const admins = usuariosCache.filter(u => u.tipo === 'admin').length;
-    const alunos = usuariosCache.filter(u => u.tipo === 'aluno').length;
-    document.getElementById('total').innerText = total;
-    document.getElementById('admins').innerText = admins;
-    document.getElementById('alunos').innerText = alunos;
-  }
-
-  function renderLista() {
-    const ul = document.getElementById('lista');
-    ul.innerHTML = '';
-
-    const termo = (document.getElementById('busca').value || '').toLowerCase().trim();
-
-    const filtrados = usuariosCache.filter(u => {
-      const t = `${u.nome || ''} ${u.email || ''} ${u.cpf || ''}`.toLowerCase();
-      return !termo || t.includes(termo);
-    });
-
-    filtrados.forEach(u => {
-      const li = document.createElement('li');
-
-      const contratoOk = !!u.contrato_arquivo;
-      const assinadoOk = !!u.assinatura_arquivo;
-
-      li.innerHTML = `
-        <div><b>${esc(u.nome || '(sem nome)')}</b> <span class="small">(${esc(u.tipo)})</span></div>
-        <div class="small">${esc(u.email)}</div>
-        <div class="small">CPF: ${esc(u.cpf || '-')}</div>
-
-        <div class="small" style="margin-top:6px;">
-          ${badge(contratoOk, 'Contrato anexado', 'Contrato não anexado')}
-          &nbsp;|&nbsp;
-          ${badge(assinadoOk, 'Assinado', 'Não assinado')}
-          ${assinadoOk && u.assinado_em ? `<span class="small">(${new Date(u.assinado_em).toLocaleString()})</span>` : ''}
-        </div>
-
-        <hr style="margin:10px 0; opacity:.2;">
-
-        <div class="row" style="gap:10px;">
-          <input type="file" id="file-${u.id}" accept="application/pdf">
-          <button onclick="enviarContrato(${u.id})">📎 Anexar PDF</button>
-        </div>
-
-        <div class="row" style="gap:10px; margin-top:10px; flex-wrap:wrap;">
-          ${u.contratoUrl ? `<a class="btn" href="${u.contratoUrl}" target="_blank">📄 Ver contrato</a>` : ``}
-          ${u.assinaturaUrl ? `<a class="btn" href="${u.assinaturaUrl}" target="_blank">🖊️ Ver assinatura</a>` : ``}
-          ${u.assinaturaUrl ? `<button class="danger" onclick="resetAssinatura(${u.id})">♻️ Liberar nova assinatura</button>` : ``}
-        </div>
+    data.forEach(u => {
+      const div = document.createElement("div");
+      div.innerHTML = `
+        <strong>${u.nome}</strong> - ${u.email} (${u.tipo})
       `;
-      ul.appendChild(li);
+      lista.appendChild(div);
     });
+
+  } catch (e) {
+    setMsg(e.message);
   }
-
-  async function enviarContrato(usuarioId) {
-    setMsg('msg', '');
-    const input = document.getElementById(`file-${usuarioId}`);
-    if (!input || !input.files.length) {
-      setMsg('msg', 'Selecione um PDF antes de anexar.');
-      return;
-    }
-
-    const fd = new FormData();
-    fd.append('arquivo', input.files[0]);
-
-    try {
-      const r = await fetch(`${API}/api/admin/contratos/${usuarioId}`, {
-        method: 'POST',
-        headers: { ...authHeaders() }, // NÃO coloca Content-Type aqui (FormData)
-        body: fd
-      });
-
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMsg('msg', data.erro || `Erro HTTP ${r.status}`);
-        return;
-      }
-
-      setMsg('msg', data.mensagem || 'Contrato anexado ✅');
-      await carregarUsuarios();
-    } catch (e) {
-      setMsg('msg', 'Falha ao enviar contrato (erro de rede).');
-      console.log(e);
-    }
-  }
-
-  async function resetAssinatura(usuarioId) {
-    setMsg('msg', 'Liberando assinatura...');
-    try {
-      const data = await apiFetch(`${API}/api/admin/assinaturas/${usuarioId}/reset`, { method: 'POST' });
-      setMsg('msg', data.mensagem || 'Assinatura liberada ✅');
-      await carregarUsuarios();
-    } catch (e) {
-      setMsg('msg', e.message || 'Erro ao liberar assinatura');
-      console.log(e);
-    }
-  }
-
-  window.onload = carregarUsuarios;
+});
 </script>
+
 </body>
 </html>
