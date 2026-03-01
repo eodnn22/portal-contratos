@@ -1,105 +1,115 @@
-// public/js/app.js
+require('dotenv').config();
+const express = require('express');
+const mysql = require('mysql2/promise');
+const bcrypt = require('bcrypt');
+const path = require('path');
 
-const API = ""; // mesma origem (Railway), não precisa colocar URL
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
-function qs(id) {
-  return document.getElementById(id);
-}
+const PORT = process.env.PORT || 8080;
 
-function setMsg(texto, tipo = "erro") {
-  const el = qs("msg");
-  if (!el) return;
+// 🔹 Conexão com Railway
+const pool = mysql.createPool(process.env.MYSQL_URL || process.env.DATABASE_URL);
 
-  el.textContent = texto || "";
-  el.classList.remove("erro", "sucesso");
+// 🔹 Criar tabela automaticamente
+async function initDatabase() {
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nome VARCHAR(100) NOT NULL,
+            email VARCHAR(100) UNIQUE NOT NULL,
+            cpf VARCHAR(20),
+            senha_hash VARCHAR(255) NOT NULL,
+            tipo VARCHAR(10) NOT NULL DEFAULT 'aluno'
+        )
+    `);
 
-  if (texto) {
-    el.classList.add(tipo === "sucesso" ? "sucesso" : "erro");
-  }
-}
+    console.log("Tabela 'usuarios' OK");
 
-async function apiFetch(url, options = {}) {
-  const res = await fetch(API + url, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+    // 🔥 Criar admin fixo se não existir
+    const [admin] = await pool.execute(
+        "SELECT * FROM usuarios WHERE email = ?",
+        ['admin01@escola.com']
+    );
 
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    // se não vier json, deixa null
-  }
+    if (admin.length === 0) {
+        const hash = await bcrypt.hash('123456', 10);
 
-  if (!res.ok) {
-    const msg = data?.erro || data?.message || `Erro HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return data;
-}
+        await pool.execute(
+            "INSERT INTO usuarios (nome, email, cpf, senha_hash, tipo) VALUES (?, ?, ?, ?, ?)",
+            ['Admin Escola', 'admin01@escola.com', '00000000000', hash, 'admin']
+        );
 
-// ===== LOGIN =====
-async function entrar() {
-  try {
-    setMsg("");
-
-    const email = String(qs("email")?.value || "").trim();
-    const senha = String(qs("senha")?.value || "");
-
-    if (!email || !senha) {
-      setMsg("Preencha email e senha.");
-      return;
+        console.log("Admin criado: admin01@escola.com / senha: 123456");
     }
-
-    const data = await apiFetch("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, senha }),
-    });
-
-    localStorage.setItem("token", data.token);
-    localStorage.setItem("usuario", JSON.stringify(data.usuario));
-
-    // redireciona
-    window.location.href = "/portal.html";
-  } catch (e) {
-    setMsg(e.message || "Erro ao logar");
-  }
 }
 
-// ===== CADASTRO =====
-async function cadastrar() {
-  try {
-    setMsg("");
+initDatabase();
 
-    const nome = String(qs("nome")?.value || "").trim();
-    const email = String(qs("email")?.value || "").trim();
-    const cpf = String(qs("cpf")?.value || "").trim();
-    const senha = String(qs("senha")?.value || "");
 
-    if (!nome || !email || !cpf || !senha) {
-      setMsg("Preencha nome, email, cpf e senha.");
-      return;
+// 🔹 REGISTER
+app.post('/api/register', async (req, res) => {
+    try {
+        const { nome, email, cpf, senha } = req.body;
+
+        const hash = await bcrypt.hash(senha, 10);
+
+        await pool.execute(
+            "INSERT INTO usuarios (nome, email, cpf, senha_hash, tipo) VALUES (?, ?, ?, ?, 'aluno')",
+            [nome, email, cpf, hash]
+        );
+
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error("REGISTER ERROR:", error);
+        res.status(500).json({ error: 'Erro ao cadastrar' });
     }
+});
 
-    await apiFetch("/api/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ nome, email, cpf, senha }),
-    });
 
-    setMsg("Conta criada ✅ Agora faça login.", "sucesso");
+// 🔹 LOGIN
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, senha } = req.body;
 
-    // opcional: mandar pro login após 800ms
-    setTimeout(() => {
-      window.location.href = "/login.html";
-    }, 800);
-  } catch (e) {
-    setMsg(e.message || "Erro ao cadastrar");
-  }
-}
+        const [rows] = await pool.execute(
+            "SELECT * FROM usuarios WHERE email = ?",
+            [email]
+        );
 
-// deixa as funções disponíveis pro onclick do HTML
-window.entrar = entrar;
-window.cadastrar = cadastrar;
+        if (rows.length === 0) {
+            return res.status(401).json({ error: 'Credenciais inválidas' });
+        }
 
-// só pra confirmar que carregou
-console.log("app.js carregado com sucesso ✅");
+        const user = rows[0];
+
+        const senhaValida = await bcrypt.compare(senha, user.senha_hash);
+
+        if (!senhaValida) {
+            return res.status(401).json({ error: 'Credenciais inválidas' });
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                nome: user.nome,
+                email: user.email,
+                tipo: user.tipo
+            }
+        });
+
+    } catch (error) {
+        console.error("LOGIN ERROR:", error);
+        res.status(500).json({ error: 'Erro no login' });
+    }
+});
+
+
+// 🔹 Servidor
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
